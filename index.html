@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>30일 런칭 챌린지 — 직장인을 위한 첫 콘텐츠 런칭</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;900&family=Noto+Serif+KR:wght@600;700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --brand: #1B3A5C;
+      --brand-dark: #122844;
+      --brand-light: #264D7A;
+      --accent: #C8A96E;
+      --accent-dark: #A8894E;
+      --text: #1A1A2E;
+      --muted: #5A6272;
+      --bg: #F8F7F4;
+      --surface: #FFFFFF;
+      --border: #E4E1D8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      margin: 0;
+    }
+    .serif { font-family: 'Noto Serif KR', serif; }
+
+    /* 버튼 */
+    .btn-primary {
+      display: inline-block;
+      background: var(--accent);
+      color: var(--brand-dark);
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 1rem 2.5rem;
+      border-radius: 4px;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 4px 20px rgba(200,169,110,0.3);
+      letter-spacing: 0.02em;
+    }
+    .btn-primary:hover {
+      background: var(--accent-dark);
+      transform: scale(1.02);
+      box-shadow: 0 6px 28px rgba(200,169,110,0.45);
+    }
+    .btn-primary:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(200,169,110,0.5);
+    }
+    .btn-primary:active {
+      transform: scale(0.98);
+      box-shadow: 0 2px 12px rgba(200,169,110,0.3);
+    }
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      display: inline-block;
+      background: transparent;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 1rem;
+      padding: 0.9rem 2.5rem;
+      border-radius: 4px;
+      border: 2px solid var(--accent);
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+    .btn-secondary:hover {
+      background: var(--accent);
+      color: var(--brand-dark);
+      transform: scale(1.02);
+    }
+    .btn-secondary:focus {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(200,169,110,0.4);
+    }
+    .btn-secondary:active {
+      transform: scale(0.98);
+    }
+
+    /* 섹션 */
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 0; }
+
+    /* 카드 */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 2rem;
+    }
+
+    /* 폼 */
+    .form-input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      font-family: 'Noto Sans KR', sans-serif;
+      font-size: 0.95rem;
+      color: var(--text);
+      background: #FAFAF8;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .form-input:focus {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(27,58,92,0.1);
+    }
+    .form-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.4rem;
+    }
+    .form-group { margin-bottom: 1.25rem; }
+
+    /* 체크 아이콘 */
+    .check-item::before {
+      content: '✓';
+      color: var(--accent);
+      font-weight: 700;
+      margin-right: 0.6rem;
+    }
+
+    /* 헤더 네비 */
+    nav { background: var(--brand); }
+
+    /* 히어로 */
+    .hero {
+      background: linear-gradient(135deg, var(--brand-dark) 0%, var(--brand) 60%, var(--brand-light) 100%);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -10%;
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(200,169,110,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      bottom: -30%;
+      left: -5%;
+      width: 400px;
+      height: 400px;
+      background: radial-gradient(circle, rgba(255,255,255,0.04) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* FAQ 아코디언 */
+    details summary { cursor: pointer; list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+    details[open] .faq-arrow { transform: rotate(180deg); }
+    .faq-arrow { transition: transform 0.2s ease; }
+
+    /* 스텝 라인 */
+    .step-line {
+      position: absolute;
+      left: 1.25rem;
+      top: 3rem;
+      bottom: -1rem;
+      width: 1px;
+      background: var(--border);
+    }
+    .step-item:last-child .step-line { display: none; }
+
+    @media (max-width: 640px) {
+      .btn-primary, .btn-secondary {
+        width: 100%;
+        text-align: center;
+        padding: 1rem 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─── 네비게이션 ─── -->
+<nav class="sticky top-0 z-50 shadow-lg">
+  <div class="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+    <span class="text-white font-bold text-lg tracking-tight">30일 런칭 챌린지</span>
+    <a href="#consultation-form" class="btn-secondary text-sm" style="padding:0.5rem 1.25rem; font-size:0.875rem;">무료 상담 신청</a>
+  </div>
+</nav>
+
+<!-- ─── 히어로 ─── -->
+<section class="hero py-24 px-6">
+  <div class="max-w-4xl mx-auto relative z-10 text-center">
+    <p class="section-label mb-6">직장 다니면서도 가능한</p>
+    <h1 class="serif text-white text-4xl md:text-5xl lg:text-6xl font-bold leading-tight mb-6">
+      30일 안에 당신의<br>
+      <span style="color:var(--accent);">첫 콘텐츠를 런칭</span>하세요
+    </h1>
+    <p class="text-slate-300 text-lg md:text-xl max-w-2xl mx-auto mb-4 leading-relaxed">
+      퇴직 준비, 막막하게 시작하지 않아도 됩니다.<br>
+      시간이 없는 직장인을 위해 설계된 구조화된 30일 챌린지.
+    </p>
+    <p style="color:var(--accent);" class="text-2xl font-bold mb-10">200,000원</p>
+    <div class="flex flex-col sm:flex-row gap-4 justify-center items-center">
+      <a href="#" class="btn-primary text-base">지금 바로 신청하기 →</a>
+      <a href="#consultation-form" class="btn-secondary text-base">무료 상담 먼저 받기</a>
+    </div>
+    <p class="text-slate-400 text-sm mt-6">만족 보장 — 결과가 없으면 돌려드립니다</p>
+  </div>
+</section>
+
+<!-- ─── 공감 섹션 ─── -->
+<section class="py-20 px-6 bg-white">
+  <div class="max-w-3xl mx-auto">
+    <p class="section-label text-center mb-4">이런 분이시죠?</p>
+    <h2 class="serif text-3xl md:text-4xl font-bold text-center mb-14" style="color:var(--brand);">
+      "해야 한다는 건 알아요.<br>근데 퇴근하면 아무것도 못 하겠어요."
+    </h2>
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="card">
+        <div class="text-2xl mb-3">⏰</div>
+        <h3 class="font-bold text-lg mb-2">시간이 없다</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--muted);">출퇴근, 야근, 주말 피로회복. 콘텐츠 만들 에너지가 남질 않습니다. 열심히 하려 해도 매번 작심삼일로 끝납니다.</p>
+      </div>
+      <div class="card">
+        <div class="text-2xl mb-3">🌀</div>
+        <h3 class="font-bold text-lg mb-2">뭘 해야 할지 모른다</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--muted);">블로그? 유튜브? 인스타? 수익 모델은? 정보는 넘치는데 정작 내 상황에 맞는 로드맵이 없습니다.</p>
+      </div>
+      <div class="card">
+        <div class="text-2xl mb-3">😔</div>
+        <h3 class="font-bold text-lg mb-2">시작만 하다 포기했다</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--muted);">블로그를 열었다가, 유튜브를 찍었다가. 결국 꾸준히 이어지지 않았습니다. 이번엔 다를 거라 다짐해도 막막합니다.</p>
+      </div>
+      <div class="card">
+        <div class="text-2xl mb-3">🔒</div>
+        <h3 class="font-bold text-lg mb-2">회사 눈치가 보인다</h3>
+        <p class="text-sm leading-relaxed" style="color:var(--muted);">부업을 드러내지 않으면서도 브랜드를 키울 수 있는 방법이 필요합니다. 조용하게, 그러나 단단하게.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 해결책 ─── -->
+<section class="py-20 px-6" style="background:var(--bg);">
+  <div class="max-w-3xl mx-auto text-center">
+    <p class="section-label mb-4">해결책</p>
+    <h2 class="serif text-3xl md:text-4xl font-bold mb-6" style="color:var(--brand);">
+      '완벽한 준비' 말고<br>지금 바로 실행할 수 있는 구조
+    </h2>
+    <p class="text-lg leading-relaxed mb-10" style="color:var(--muted);">
+      30일 챌린지는 하루 30~60분, 직장인 스케줄에 맞게 설계된 실행 프로그램입니다.<br>
+      고민하는 시간을 없애고, 오늘 해야 할 일 하나만 알려드립니다.
+    </p>
+    <div class="grid md:grid-cols-3 gap-6 text-left">
+      <div class="card text-center">
+        <div class="text-3xl mb-3">🗂️</div>
+        <h3 class="font-bold mb-2">구조화된 커리큘럼</h3>
+        <p class="text-sm" style="color:var(--muted);">아이디어 발굴부터 첫 런칭까지 단계별 미션으로 쪼개드립니다</p>
+      </div>
+      <div class="card text-center">
+        <div class="text-3xl mb-3">📅</div>
+        <h3 class="font-bold mb-2">직장인 맞춤 스케줄</h3>
+        <p class="text-sm" style="color:var(--muted);">하루 30~60분으로 완성 가능. 주말 집중 세션 포함</p>
+      </div>
+      <div class="card text-center">
+        <div class="text-3xl mb-3">🚀</div>
+        <h3 class="font-bold mb-2">30일 내 실제 런칭</h3>
+        <p class="text-sm" style="color:var(--muted);">공부로 끝나지 않습니다. 챌린지 종료 시 실제 콘텐츠가 세상에 나옵니다</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 챌린지 구성 ─── -->
+<section class="py-20 px-6 bg-white">
+  <div class="max-w-3xl mx-auto">
+    <p class="section-label text-center mb-4">챌린지 구성</p>
+    <h2 class="serif text-3xl font-bold text-center mb-14" style="color:var(--brand);">30일 동안 이런 일이 일어납니다</h2>
+    <div class="space-y-0">
+      <div class="step-item relative flex gap-5 pb-10">
+        <div class="step-line"></div>
+        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white z-10" style="background:var(--brand);">1주</div>
+        <div class="pt-1">
+          <h3 class="font-bold text-lg mb-1">기반 구축 — 나만의 주제와 포지션 찾기</h3>
+          <p class="text-sm leading-relaxed" style="color:var(--muted);">내가 잘 하는 것, 말할 수 있는 것, 돈이 되는 것의 교차점을 찾습니다. 콘텐츠 방향과 타겟을 확정합니다.</p>
+        </div>
+      </div>
+      <div class="step-item relative flex gap-5 pb-10">
+        <div class="step-line"></div>
+        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white z-10" style="background:var(--brand-light);">2주</div>
+        <div class="pt-1">
+          <h3 class="font-bold text-lg mb-1">콘텐츠 제작 — 첫 작품 만들기</h3>
+          <p class="text-sm leading-relaxed" style="color:var(--muted);">글, 영상, 오디오 중 나에게 맞는 형식을 선택. 제작 루틴과 템플릿으로 시간을 줄입니다.</p>
+        </div>
+      </div>
+      <div class="step-item relative flex gap-5 pb-10">
+        <div class="step-line"></div>
+        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white z-10" style="background:var(--accent-dark);">3주</div>
+        <div class="pt-1">
+          <h3 class="font-bold text-lg mb-1">구조 설계 — 수익화 기반 만들기</h3>
+          <p class="text-sm leading-relaxed" style="color:var(--muted);">무료 콘텐츠 → 유료 제품으로 연결되는 구조를 설계합니다. 런칭 준비를 시작합니다.</p>
+        </div>
+      </div>
+      <div class="step-item relative flex gap-5">
+        <div class="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm text-white z-10" style="background:var(--accent);">4주</div>
+        <div class="pt-1">
+          <h3 class="font-bold text-lg mb-1">런칭 — 세상에 내보내기</h3>
+          <p class="text-sm leading-relaxed" style="color:var(--muted);">첫 콘텐츠 또는 제품을 실제로 발행합니다. 반응을 보고 다음 스텝을 설계합니다.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ─── 오퍼 / 가격 ─── -->
+<section class="py-20 px-6" style="background:var(--brand-dark);">
+  <div class="max-w-2xl mx-auto text-center">
+    <p class="section-label mb-4">오퍼 구성</p>
+    <h2 class="serif text-3xl md:text-4xl font-bold text-white mb-10">30일 챌린지에 포함된 것들</h2>
+    <div class="bg-white rounded-2xl p-8 text-left mb-8 shadow-2xl">
+      <ul class="space-y-4 mb-8">
+        <li class="check-item font-semibold">30일 구조화 커리큘럼 (일일 미션 포함)</li>
+        <li class="check-item font-semibold">콘텐츠 제작 템플릿 및 워크시트</li>
+        <li class="check-item font-semibold">직장인 맞춤 시간 관리 시스템</li>
+        <li class="check-item font-semibold">런칭 체크리스트 & 수익화 로드맵</li>
+        <li class="check-item font-semibold">커뮤니티 참여 및 피어 피드백</li>
+      </ul>
+      <hr class="divider mb-6">
+      <div class="flex items-end justify-between">
+        <div>
+          <p class="text-sm font-medium" style="color:var(--muted);">전체 패키지</p>
+          <p class="serif text-4xl font-bold" style="color:var(--brand);">200,000<span class="text-xl">원</span></p>
+        </div>
+        <div class="text-right">
+          <p class="text-sm" style="color:var(--accent-dark); font-weight:600;">✓ 만족 보장</p>
+          <p class="text-xs mt-1" style="color:var(--muted);">결과가 없으면 돌려드립니다</p>
+        </div>
+      </div>
+    </div>
+    <a href="#" class="btn-primary text-lg" style="padding:1.1rem 3rem;">지금 바로 신청하기 →</a>
+    <p class="text-slate-400 text-sm mt-4">결제 후 바로 시작 가능 · 언제든 문의 환영</p>
+  </div>
+</section>
+
+<!-- ─── FAQ ─── -->
+<section class="py-20 px-6 bg-white">
+  <div class="max-w-2xl mx-auto">
+    <p class="section-label text-center mb-4">FAQ</p>
+    <h2 class="serif text-3xl font-bold text-center mb-12" style="color:var(--brand);">자주 하시는 질문</h2>
+    <div class="space-y-4">
+
+      <details class="card group" open>
+        <summary class="flex items-center justify-between font-semibold text-base pr-2 py-1">
+          <span>정말 직장 다니면서 할 수 있나요?</span>
+          <svg class="faq-arrow w-5 h-5 flex-shrink-0" style="color:var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <p class="mt-4 text-sm leading-relaxed" style="color:var(--muted);">네. 하루 30~60분을 기준으로 설계되었습니다. 주중에는 짧은 미션, 주말에 집중 작업하는 방식입니다. 실제 참가자 대부분이 직장인입니다.</p>
+      </details>
+
+      <details class="card group">
+        <summary class="flex items-center justify-between font-semibold text-base pr-2 py-1">
+          <span>콘텐츠 경험이 전혀 없어도 되나요?</span>
+          <svg class="faq-arrow w-5 h-5 flex-shrink-0" style="color:var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <p class="mt-4 text-sm leading-relaxed" style="color:var(--muted);">처음 시작하는 분들을 위해 만들어졌습니다. 어떤 주제로, 어떤 형태로 시작할지부터 함께 정합니다. 빈 종이 앞에서 막막한 분이라면 이 챌린지가 가장 적합합니다.</p>
+      </details>
+
+      <details class="card group">
+        <summary class="flex items-center justify-between font-semibold text-base pr-2 py-1">
+          <span>만족 보장은 어떻게 되나요?</span>
+          <svg class="faq-arrow w-5 h-5 flex-shrink-0" style="color:var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <p class="mt-4 text-sm leading-relaxed" style="color:var(--muted);">챌린지를 성실하게 수행했는데도 기대하신 결과를 얻지 못했다고 느끼신다면 환불을 도와드립니다. 자세한 조건은 상담 시 안내드립니다.</p>
+      </details>
+
+      <details class="card group">
+        <summary class="flex items-center justify-between font-semibold text-base pr-2 py-1">
+          <span>30일 이후에도 지원이 있나요?</span>
+          <svg class="faq-arrow w-5 h-5 flex-shrink-0" style="color:var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <p class="mt-4 text-sm leading-relaxed" style="color:var(--muted);">챌린지 커뮤니티는 이후에도 유지됩니다. 런칭 후 다음 스텝을 함께 고민할 수 있는 환경을 제공합니다.</p>
+      </details>
+
+      <details class="card group">
+        <summary class="flex items-center justify-between font-semibold text-base pr-2 py-1">
+          <span>회사에서 알게 될까요?</span>
+          <svg class="faq-arrow w-5 h-5 flex-shrink-0" style="color:var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <p class="mt-4 text-sm leading-relaxed" style="color:var(--muted);">소속이나 실명을 드러내지 않는 방식으로 콘텐츠를 시작하는 방법도 함께 다룹니다. 조용하게 브랜드를 쌓아가는 전략을 알려드립니다.</p>
+      </details>
+
+    </div>
+  </div>
+</section>
+
+<!-- ─── 최종 CTA ─── -->
+<section class="py-20 px-6" style="background:var(--bg);">
+  <div class="max-w-2xl mx-auto text-center">
+    <p class="section-label mb-4">지금 시작하세요</p>
+    <h2 class="serif text-3xl md:text-4xl font-bold mb-6" style="color:var(--brand);">
+      퇴직 이후를 준비하는<br>가장 현실적인 첫 걸음
+    </h2>
+    <p class="text-lg leading-relaxed mb-8" style="color:var(--muted);">
+      1년 후의 나를 위해, 오늘 30분을 투자하세요.<br>
+      30일 후에는 실제 콘텐츠가 세상에 존재할 것입니다.
+    </p>
+    <a href="#" class="btn-primary text-lg" style="padding:1.1rem 3rem;">지금 바로 신청하기 →</a>
+    <p class="text-sm mt-4" style="color:var(--muted);">200,000원 · 만족 보장 · 지금 등록하면 즉시 시작 가능</p>
+  </div>
+</section>
+
+<!-- ─── 무료 상담 폼 ─── -->
+<section id="consultation-form" class="py-20 px-6 bg-white">
+  <div class="max-w-xl mx-auto">
+    <p class="section-label text-center mb-4">무료 상담</p>
+    <h2 class="serif text-3xl font-bold text-center mb-4" style="color:var(--brand);">신청 전에 먼저 상담 받으세요</h2>
+    <p class="text-center mb-10" style="color:var(--muted);">간단한 정보를 남겨주시면 24시간 내에 연락드립니다.</p>
+
+    <form id="consult-form" class="card shadow-md" novalidate>
+      <div class="form-group">
+        <label class="form-label" for="name">이름 <span style="color:#E53E3E;">*</span></label>
+        <input class="form-input" type="text" id="name" name="name" placeholder="홍길동" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="phone">연락처 <span style="color:#E53E3E;">*</span></label>
+        <input class="form-input" type="tel" id="phone" name="phone" placeholder="010-0000-0000" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="email">이메일 <span style="color:#E53E3E;">*</span></label>
+        <input class="form-input" type="email" id="email" name="email" placeholder="example@email.com" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="situation">현재 직업 / 상황 <span style="color:#E53E3E;">*</span></label>
+        <textarea class="form-input" id="situation" name="situation" rows="3" placeholder="예: 중소기업 마케터 7년차, 퇴직 후 강의 사업 준비 중" required></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="motivation">챌린지 참여 동기</label>
+        <textarea class="form-input" id="motivation" name="motivation" rows="3" placeholder="예: 막연하게 유튜브를 시작하고 싶었는데 방향을 잡고 싶어서요"></textarea>
+      </div>
+
+      <button type="submit" class="btn-primary w-full text-center mt-4" style="padding:1rem;">상담 신청하기</button>
+      <p class="text-xs text-center mt-3" style="color:var(--muted);">개인정보는 상담 목적으로만 사용됩니다</p>
+    </form>
+
+    <!-- 제출 완료 메시지 (숨김) -->
+    <div id="form-success" class="hidden card text-center mt-6" style="border-color:var(--accent);">
+      <div class="text-3xl mb-3">✅</div>
+      <h3 class="font-bold text-lg mb-2" style="color:var(--brand);">상담 신청이 완료되었습니다!</h3>
+      <p style="color:var(--muted);" class="text-sm">24시간 내로 연락드리겠습니다. 감사합니다.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ─── P.S. ─── -->
+<section class="py-12 px-6" style="background:var(--brand-dark);">
+  <div class="max-w-2xl mx-auto text-center">
+    <p class="text-slate-300 text-base leading-relaxed">
+      <strong class="text-white">P.S.</strong> 지금 이 페이지를 읽고 있다는 것 자체가, 이미 변화를 원한다는 신호입니다.<br>
+      완벽한 준비가 될 때까지 기다리지 마세요. 30일 후의 나는 오늘의 당신이 만듭니다.
+    </p>
+  </div>
+</section>
+
+<!-- ─── 푸터 ─── -->
+<footer class="py-8 px-6" style="background:#0D1F33;">
+  <div class="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+    <span class="text-slate-400 text-sm">© 2025 30일 런칭 챌린지. All rights reserved.</span>
+    <span class="text-slate-500 text-xs">문의: 상담 폼을 이용해 주세요</span>
+  </div>
+</footer>
+
+<script>
+  // FAQ 아코디언: 하나 열면 나머지 닫기 (선택적)
+  document.querySelectorAll('details').forEach(detail => {
+    detail.addEventListener('toggle', function() {
+      if (this.open) {
+        document.querySelectorAll('details').forEach(d => {
+          if (d !== this) d.removeAttribute('open');
+        });
+      }
+    });
+  });
+
+  // 폼 제출 처리 (UI 전용 — 백엔드 연동 전)
+  document.getElementById('consult-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const required = ['name', 'phone', 'email', 'situation'];
+    let valid = true;
+    required.forEach(id => {
+      const el = document.getElementById(id);
+      if (!el.value.trim()) {
+        el.style.borderColor = '#E53E3E';
+        valid = false;
+      } else {
+        el.style.borderColor = '';
+      }
+    });
+
+    if (!valid) {
+      alert('필수 항목을 모두 입력해 주세요.');
+      return;
+    }
+
+    // 성공 상태 표시
+    this.style.display = 'none';
+    document.getElementById('form-success').classList.remove('hidden');
+    window.scrollTo({ top: document.getElementById('form-success').offsetTop - 80, behavior: 'smooth' });
+  });
+</script>
+
+</body>
+</html>
