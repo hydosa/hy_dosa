@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -429,6 +430,122 @@ def report(trades: pd.DataFrame, baseline: np.ndarray, cfg: Config) -> str:
     return "\n".join(L)
 
 
+
+def _f(x):
+    """numpy 스칼라 → JSON 직렬화 가능한 float."""
+    try:
+        v = float(x)
+        return None if (np.isnan(v) or np.isinf(v)) else round(v, 6)
+    except Exception:
+        return None
+
+
+def _group_stats(t: pd.DataFrame, key) -> list:
+    out = []
+    for k, g in t.groupby(key, observed=True):
+        r = g["net_ret"]
+        out.append({
+            "key": str(k),
+            "n": int(len(r)),
+            "win_rate": _f(100 * (r > 0).mean()),
+            "mean_ret": _f(100 * r.mean()),
+        })
+    return out
+
+
+def build_dashboard_data(res: dict, baseline: np.ndarray, cfg: Config, uni_n: int) -> dict:
+    """대시보드(dashboard.html)가 읽는 단일 JSON 구조를 만든다."""
+    variants = []
+    for label, t in res.items():
+        if t is None or t.empty:
+            continue
+        t = t.copy()
+        t["entry_date"] = pd.to_datetime(t["entry_date"])
+        r = t["net_ret"]
+        wins, losses = r[r > 0], r[r <= 0]
+
+        # 수익률 분포 (−15% ~ +15%, 1%p 단위)
+        edges = np.arange(-0.15, 0.1501, 0.01)
+        counts, _ = np.histogram(r.clip(-0.1499, 0.1499), bins=edges)
+        hist = [{"lo": _f(100 * edges[i]), "hi": _f(100 * edges[i + 1]), "n": int(c)}
+                for i, c in enumerate(counts)]
+
+        # 누적 수익 곡선: 진입일별 평균 수익률의 누적합 (매일 균등분산 가정)
+        daily = t.groupby("entry_date")["net_ret"].mean().sort_index()
+        equity = [{"d": d.strftime("%Y-%m-%d"), "v": _f(100 * v)}
+                  for d, v in daily.cumsum().items()]
+
+        def quint(col):
+            if col not in t.columns or t[col].isna().all():
+                return []
+            try:
+                q = pd.qcut(t[col], 5, labels=[1, 2, 3, 4, 5], duplicates="drop")
+                return _group_stats(t.assign(_q=q), "_q")
+            except Exception:
+                return []
+
+        cols = ["ticker", "name", "market", "entry_date", "exit_date", "net_ret", "inst_sum", "frgn_sum"]
+        cols = [c for c in cols if c in t.columns]
+
+        def recs(d):
+            out = []
+            for _, x in d[cols].iterrows():
+                out.append({
+                    "ticker": str(x.get("ticker", "")),
+                    "name": str(x.get("name", "")),
+                    "market": str(x.get("market", "")),
+                    "entry": pd.to_datetime(x["entry_date"]).strftime("%Y-%m-%d"),
+                    "exit": pd.to_datetime(x["exit_date"]).strftime("%Y-%m-%d"),
+                    "ret": _f(100 * x["net_ret"]),
+                    "inst": _f(x.get("inst_sum")),
+                    "frgn": _f(x.get("frgn_sum")),
+                })
+            return out
+
+        variants.append({
+            "label": label,
+            "n": int(len(r)),
+            "win_rate": _f(100 * (r > 0).mean()),
+            "mean_ret": _f(100 * r.mean()),
+            "median_ret": _f(100 * r.median()),
+            "std": _f(100 * r.std()),
+            "avg_win": _f(100 * wins.mean()) if len(wins) else None,
+            "avg_loss": _f(100 * losses.mean()) if len(losses) else None,
+            "payoff": _f(abs(wins.mean() / losses.mean())) if len(losses) and losses.mean() else None,
+            "pf": _f(wins.sum() / abs(losses.sum())) if len(losses) and losses.sum() else None,
+            "by_year": _group_stats(t.assign(_y=t["entry_date"].dt.year), "_y"),
+            "by_market": _group_stats(t, "market"),
+            "by_inst_q": quint("inst_sum"),
+            "by_frgn_q": quint("frgn_sum"),
+            "hist": hist,
+            "equity": equity,
+            "top": recs(t.nlargest(15, "net_ret")),
+            "bottom": recs(t.nsmallest(15, "net_ret")),
+        })
+
+    b = None
+    if len(baseline):
+        bs = pd.Series(baseline)
+        b = {"n": int(len(bs)), "win_rate": _f(100 * (bs > 0).mean()), "mean_ret": _f(100 * bs.mean())}
+
+    all_dates = [v["equity"][0]["d"] for v in variants if v["equity"]]
+    all_end = [v["equity"][-1]["d"] for v in variants if v["equity"]]
+    return {
+        "meta": {
+            "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "start": min(all_dates) if all_dates else "",
+            "end": max(all_end) if all_end else "",
+            "streak": cfg.streak,
+            "hold": cfg.hold,
+            "cost_bps": cfg.cost_bps,
+            "markets": list(cfg.markets),
+            "universe": int(uni_n),
+        },
+        "baseline": b,
+        "variants": variants,
+    }
+
+
 def compare(res: dict, baseline: np.ndarray, cfg: Config) -> str:
     """조건별 성과 비교표. res = {라벨: trades DataFrame}"""
     L = []
@@ -573,7 +690,13 @@ def main():
 
     with open(f"{args.out}_summary.txt", "w", encoding="utf-8") as f:
         f.write("\n\n".join(parts))
+
+    data = build_dashboard_data(res, baseline, cfg, len(uni))
+    with open(f"{args.out}_dashboard.json", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
     print(f"\n저장: {args.out}_*_trades.csv / {args.out}_summary.txt")
+    print(f"      {args.out}_dashboard.json  ← dashboard.html 에 올리면 화면으로 보입니다")
 
 
 if __name__ == "__main__":
