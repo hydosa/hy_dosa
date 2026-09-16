@@ -1,0 +1,3 @@
+backtest/cache/
+backtest/__pycache__/
+backtest/result_*
