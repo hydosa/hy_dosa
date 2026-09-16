@@ -1,3 +1,5 @@
 backtest/cache/
 backtest/__pycache__/
 backtest/result_*
+backtest/.env
+.env

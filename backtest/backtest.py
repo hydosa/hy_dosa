@@ -26,7 +26,36 @@ from datetime import datetime, timedelta
 import numpy as np
 import pandas as pd
 
-CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "cache")
+ENV_PATH = os.path.join(BASE_DIR, ".env")
+
+
+def load_env(path: str = ENV_PATH) -> None:
+    """
+    .env 파일에서 KRX_ID / KRX_PW 등을 읽어 환경변수로 올린다.
+
+    pykrx 1.2.x는 모듈을 import 하는 시점에 os.getenv("KRX_ID")를 읽으므로,
+    반드시 pykrx import 전에 호출해야 한다. (이 파일은 pykrx를 지연 import 한다)
+    이미 설정된 환경변수는 덮어쓰지 않는다.
+    """
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and not os.environ.get(k):
+                    os.environ[k] = v
+    except Exception as e:
+        print(f"[경고] .env 읽기 실패: {e}", file=sys.stderr)
+
+
+load_env()
 
 # 투자자별 순매수 컬럼 후보 (pykrx 버전에 따라 명칭이 다름)
 INST_COLS = ["기관합계", "기관", "기관계"]
@@ -64,6 +93,44 @@ def _pykrx():
     except ImportError:
         sys.exit("pykrx 미설치. `pip install -r requirements.txt` 실행 후 다시 시도하세요.")
     return stock
+
+
+def check_krx() -> int:
+    """KRX 계정 설정 상태와 데이터 수신 여부를 점검한다."""
+    import importlib.metadata as md
+
+    try:
+        ver = md.version("pykrx")
+    except Exception:
+        ver = "?"
+    print(f"pykrx 버전      : {ver}")
+    print(f".env 파일       : {ENV_PATH} {'(있음)' if os.path.exists(ENV_PATH) else '(없음)'}")
+
+    kid, kpw = os.environ.get("KRX_ID"), os.environ.get("KRX_PW")
+    if kid:
+        print(f"KRX_ID          : {kid[:2]}{'*' * max(len(kid) - 2, 0)}  (설정됨)")
+    else:
+        print("KRX_ID          : 없음")
+    print(f"KRX_PW          : {'설정됨 (' + '*' * len(kpw) + ')' if kpw else '없음'}")
+
+    if ver.startswith("1.0") and not kid:
+        print("\n→ pykrx 1.0.x는 로그인이 필요 없습니다. 이대로 실행하시면 됩니다.")
+    elif ver.startswith("1.2") and not kid:
+        print("\n→ pykrx 1.2.x는 KRX 로그인이 필요합니다. .env에 KRX_ID/KRX_PW를 넣으세요.")
+
+    print("\n데이터 수신 테스트 (삼성전자 005930, 최근 10영업일)…")
+    end = datetime.today()
+    start = end - timedelta(days=20)
+    df = fetch_ticker("005930", start.strftime("%Y%m%d"), end.strftime("%Y%m%d"), use_cache=False)
+    if df is None or df.empty:
+        print("  ✗ 실패. 데이터를 받지 못했습니다.")
+        print("    · 계정/비밀번호 확인")
+        print("    · KRX 사이트에서 직접 로그인되는지 확인 (비밀번호 만료 여부)")
+        print("    · 회사 방화벽/프록시가 data.krx.co.kr을 막고 있는지 확인")
+        return 1
+    print(f"  ✓ 성공. {len(df)}일치 수신")
+    print(df.tail(3)[["open", "close", "inst", "foreign"]].to_string())
+    return 0
 
 
 def _call(stock, names, *args, **kwargs):
@@ -431,7 +498,12 @@ def main():
     p.add_argument("--market", default="KOSPI,KOSDAQ")
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--out", default="result")
+    p.add_argument("--check-krx", action="store_true",
+                   help="KRX 계정 설정과 데이터 수신만 점검하고 종료")
     args = p.parse_args()
+
+    if args.check_krx:
+        sys.exit(check_krx())
 
     cfg = Config(
         years=args.years,
