@@ -20,7 +20,7 @@ import argparse
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -28,8 +28,12 @@ import pandas as pd
 
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache")
 
-# 기관 순매수 컬럼 후보 (pykrx 버전에 따라 명칭이 다름)
+# 투자자별 순매수 컬럼 후보 (pykrx 버전에 따라 명칭이 다름)
 INST_COLS = ["기관합계", "기관", "기관계"]
+FRGN_COLS = ["외국인합계", "외국인", "외국인계"]
+
+# 캐시 포맷 버전. 컬럼 구성이 바뀌면 올려서 기존 캐시를 무효화한다.
+CACHE_VER = "v2"
 
 
 # ----------------------------------------------------------------------------
@@ -42,7 +46,9 @@ class Config:
     hold: int = 5              # 보유 거래일
     markets: tuple = ("KOSPI", "KOSDAQ")
     cost_bps: float = 33.0     # 왕복 비용(bp). 수수료 0.015%x2 + 증권거래세 0.15% + 슬리피지
+    require_foreign: bool = False  # True면 같은 날들에 외국인도 순매수여야 함
     min_inst_amount: float = 0.0   # 연속 기간 기관 순매수 합계 최소 금액(원). 0=제한없음
+    min_frgn_amount: float = 0.0   # 연속 기간 외국인 순매수 합계 최소 금액(원). 0=제한없음
     min_turnover: float = 0.0      # 매수 직전일 거래대금 최소(원). 0=제한없음
     max_tickers: int = 0           # 0=전체
     exclude_pref: bool = True      # 우선주 제외
@@ -100,10 +106,12 @@ def get_universe(cfg: Config, asof: str) -> pd.DataFrame:
 def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True) -> pd.DataFrame | None:
     """한 종목의 OHLCV + 투자자별 순매수(기관) 일별 데이터."""
     os.makedirs(CACHE_DIR, exist_ok=True)
-    path = os.path.join(CACHE_DIR, f"{ticker}_{start}_{end}.pkl")
+    path = os.path.join(CACHE_DIR, f"{ticker}_{start}_{end}_{CACHE_VER}.pkl")
     if use_cache and os.path.exists(path):
         try:
-            return pd.read_pickle(path)
+            cached = pd.read_pickle(path)
+            if "foreign" in cached.columns:
+                return cached
         except Exception:
             pass
 
@@ -121,7 +129,9 @@ def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True) -> p
         return None
 
     inst_col = next((c for c in INST_COLS if c in inv.columns), None)
-    if inst_col is None:
+    frgn_col = next((c for c in FRGN_COLS if c in inv.columns), None)
+    if inst_col is None or frgn_col is None:
+        print(f"  [skip] {ticker}: 투자자별 컬럼 없음 ({list(inv.columns)})", file=sys.stderr)
         return None
 
     df = pd.DataFrame(
@@ -135,7 +145,8 @@ def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True) -> p
         }
     )
     df["inst"] = inv[inst_col].astype(float)
-    df = df.dropna(subset=["open", "close", "inst"])
+    df["foreign"] = inv[frgn_col].astype(float)
+    df = df.dropna(subset=["open", "close", "inst", "foreign"])
     df = df[df["volume"] > 0]
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
@@ -164,9 +175,19 @@ def run_ticker(df: pd.DataFrame, cfg: Config, ticker: str = "", name: str = "",
     d = df.reset_index().rename(columns={df.index.name or "index": "date"})
     d.columns = ["date"] + list(d.columns[1:])
 
-    pos = (d["inst"] > 0).astype(int)
-    streak_ok = pos.rolling(cfg.streak).sum() == cfg.streak       # D일 기준 충족
+    if "foreign" not in d.columns:
+        d["foreign"] = np.nan
+
+    inst_pos = (d["inst"] > 0).astype(int)
+    if cfg.require_foreign:
+        # 연속 기간의 '매일' 기관·외국인이 동시에 순매수여야 함
+        both = ((d["inst"] > 0) & (d["foreign"] > 0)).astype(int)
+        streak_ok = both.rolling(cfg.streak).sum() == cfg.streak
+    else:
+        streak_ok = inst_pos.rolling(cfg.streak).sum() == cfg.streak
+
     inst_sum = d["inst"].rolling(cfg.streak).sum()
+    frgn_sum = d["foreign"].rolling(cfg.streak).sum()
 
     n = len(d)
     sig_idx = np.where(streak_ok.fillna(False).values)[0]
@@ -198,6 +219,7 @@ def run_ticker(df: pd.DataFrame, cfg: Config, ticker: str = "", name: str = "",
             "entry_px": entry_px,
             "exit_px": exit_px,
             "inst_sum": inst_sum.values[sig_idx],
+            "frgn_sum": frgn_sum.values[sig_idx],
             "prev_turnover": d["turnover"].values[sig_idx],
             "gross_ret": gross,
             "net_ret": net,
@@ -206,6 +228,8 @@ def run_ticker(df: pd.DataFrame, cfg: Config, ticker: str = "", name: str = "",
 
     if cfg.min_inst_amount:
         out = out[out["inst_sum"] >= cfg.min_inst_amount]
+    if cfg.min_frgn_amount:
+        out = out[out["frgn_sum"] >= cfg.min_frgn_amount]
     if cfg.min_turnover:
         out = out[out["prev_turnover"].fillna(0) >= cfg.min_turnover]
     return out
@@ -251,8 +275,9 @@ def summarize(r: pd.Series) -> dict:
 def report(trades: pd.DataFrame, baseline: np.ndarray, cfg: Config) -> str:
     L = []
     A = L.append
+    subj = "기관+외국인 동시" if cfg.require_foreign else "기관"
     A("=" * 78)
-    A(f"기관 {cfg.streak}일 연속 순매수 → 익일 시가 매수 → {cfg.hold}거래일 보유 백테스트")
+    A(f"{subj} {cfg.streak}일 연속 순매수 → 익일 시가 매수 → {cfg.hold}거래일 보유 백테스트")
     A("=" * 78)
     A(f"기간            : {trades['entry_date'].min():%Y-%m-%d} ~ {trades['exit_date'].max():%Y-%m-%d}")
     A(f"대상 시장       : {', '.join(cfg.markets)}")
@@ -315,10 +340,73 @@ def report(trades: pd.DataFrame, baseline: np.ndarray, cfg: Config) -> str:
         A("  (샘플 부족)")
     A("")
 
+    if t["frgn_sum"].notna().any():
+        A("[외국인 순매수 금액 5분위별] (1=소액/순매도 … 5=대액)")
+        try:
+            t["외인분위"] = pd.qcut(t["frgn_sum"], 5, labels=[1, 2, 3, 4, 5], duplicates="drop")
+            q2 = t.groupby("외인분위", observed=True)["net_ret"].agg(
+                거래수="count",
+                승률=lambda s: round(100 * (s > 0).mean(), 2),
+                평균수익률=lambda s: round(100 * s.mean(), 3),
+            )
+            A(q2.to_string())
+        except Exception:
+            A("  (샘플 부족)")
+        A("")
+
     A("[주의]")
     A("  · 현재 상장 종목만 대상 → 상장폐지 종목 제외로 인한 생존 편향(수익률 과대) 존재")
     A("  · 시가 체결 가정. 실제로는 시초가 슬리피지가 추가로 발생")
     A("  · 동시 진입 종목 수 제한 없음(무한 자금 가정). 실제 운용 시 종목 선별 필요")
+    A("=" * 78)
+    return "\n".join(L)
+
+
+def compare(res: dict, baseline: np.ndarray, cfg: Config) -> str:
+    """조건별 성과 비교표. res = {라벨: trades DataFrame}"""
+    L = []
+    A = L.append
+    A("=" * 78)
+    A(f"조건별 비교  ({cfg.streak}일 연속 순매수 → 익일 시가 매수 → {cfg.hold}거래일 보유)")
+    A("=" * 78)
+
+    base_win = base_ret = None
+    if len(baseline):
+        b = summarize(pd.Series(baseline))
+        base_win, base_ret = b["승률(%)"], b["평균수익률(%)"]
+
+    rows = []
+    for label, tr in res.items():
+        if tr is None or tr.empty:
+            rows.append({"조건": label, "거래수": 0})
+            continue
+        s = summarize(tr["net_ret"])
+        rows.append({
+            "조건": label,
+            "거래수": s["거래수"],
+            "승률(%)": s["승률(%)"],
+            "평균수익률(%)": s["평균수익률(%)"],
+            "중앙값(%)": s["중앙값(%)"],
+            "손익비": s["손익비"],
+            "PF": s["Profit Factor"],
+            "초과승률(%p)": round(s["승률(%)"] - base_win, 2) if base_win is not None else np.nan,
+            "초과수익(%p)": round(s["평균수익률(%)"] - base_ret, 3) if base_ret is not None else np.nan,
+        })
+    if base_win is not None:
+        rows.append({
+            "조건": "(비교군) 임의 진입",
+            "거래수": len(baseline),
+            "승률(%)": base_win,
+            "평균수익률(%)": base_ret,
+            "초과승률(%p)": 0.0,
+            "초과수익(%p)": 0.0,
+        })
+
+    A(pd.DataFrame(rows).to_string(index=False))
+    A("")
+    A("  ※ 모두 거래비용 차감 후. '초과수익'이 전략의 실제 엣지입니다.")
+    A("  ※ 외국인 조건을 걸면 거래수가 크게 줄어듭니다. 거래수가 100건 미만이면")
+    A("     승률 숫자는 우연일 가능성이 높으니 신뢰하지 마십시오.")
     A("=" * 78)
     return "\n".join(L)
 
@@ -331,6 +419,13 @@ def main():
     p.add_argument("--hold", type=int, default=5)
     p.add_argument("--cost-bps", type=float, default=33.0)
     p.add_argument("--min-inst-amount", type=float, default=0.0, help="기관 순매수 합계 최소 금액(원)")
+    p.add_argument("--min-frgn-amount", type=float, default=0.0, help="외국인 순매수 합계 최소 금액(원)")
+    p.add_argument(
+        "--mode",
+        default="both",
+        choices=["inst", "inst+frgn", "both"],
+        help="inst=기관만, inst+frgn=기관+외국인 동시, both=둘 다 돌려서 비교(기본)",
+    )
     p.add_argument("--min-turnover", type=float, default=0.0, help="시그널일 거래대금 최소(원)")
     p.add_argument("--max-tickers", type=int, default=0, help="0=전 종목")
     p.add_argument("--market", default="KOSPI,KOSDAQ")
@@ -345,6 +440,7 @@ def main():
         markets=tuple(m.strip() for m in args.market.split(",") if m.strip()),
         cost_bps=args.cost_bps,
         min_inst_amount=args.min_inst_amount,
+        min_frgn_amount=args.min_frgn_amount,
         min_turnover=args.min_turnover,
         max_tickers=args.max_tickers,
     )
@@ -357,34 +453,55 @@ def main():
     uni = get_universe(cfg, end)
     print(f"  대상 종목: {len(uni):,}개")
 
-    all_trades, all_base = [], []
+    # 돌릴 조건 구성 (데이터는 한 번만 받고 조건만 달리 적용)
+    variants = []
+    if args.mode in ("inst", "both"):
+        variants.append(("기관 단독", replace(cfg, require_foreign=False), "inst"))
+    if args.mode in ("inst+frgn", "both"):
+        variants.append(("기관+외국인 동시", replace(cfg, require_foreign=True), "inst_frgn"))
+
+    buckets = {label: [] for label, _, _ in variants}
+    all_base = []
     t0 = time.time()
     for i, row in uni.iterrows():
         df = fetch_ticker(row["ticker"], start, end, use_cache=not args.no_cache)
         if df is None or df.empty:
             continue
-        tr = run_ticker(df, cfg, row["ticker"], row["name"], row["market"])
-        if not tr.empty:
-            all_trades.append(tr)
+        for label, vcfg, _ in variants:
+            tr = run_ticker(df, vcfg, row["ticker"], row["name"], row["market"])
+            if not tr.empty:
+                buckets[label].append(tr)
         all_base.append(baseline_ticker(df, cfg))
         if (i + 1) % 25 == 0:
             el = time.time() - t0
             eta = el / (i + 1) * (len(uni) - i - 1)
             print(f"  {i+1:>5}/{len(uni)}  경과 {el/60:.1f}분  남은시간 약 {eta/60:.1f}분")
 
-    if not all_trades:
-        sys.exit("거래 시그널이 없습니다. 조건을 완화해 보세요.")
-
-    trades = pd.concat(all_trades, ignore_index=True)
     baseline = np.concatenate([b for b in all_base if len(b)]) if all_base else np.array([])
 
-    txt = report(trades, baseline, cfg)
-    print("\n" + txt)
+    res, parts = {}, []
+    for label, vcfg, slug in variants:
+        frames = buckets[label]
+        trades = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        res[label] = trades
+        if trades.empty:
+            print(f"\n[{label}] 거래 시그널이 없습니다. 조건을 완화해 보세요.")
+            continue
+        txt = report(trades, baseline, vcfg)
+        print("\n" + txt)
+        parts.append(txt)
+        trades.to_csv(f"{args.out}_{slug}_trades.csv", index=False, encoding="utf-8-sig")
 
-    trades.to_csv(f"{args.out}_trades.csv", index=False, encoding="utf-8-sig")
+    if not any(not t.empty for t in res.values()):
+        sys.exit("전 조건에서 거래 시그널이 없습니다.")
+
+    cmp_txt = compare(res, baseline, cfg)
+    print("\n" + cmp_txt)
+    parts.append(cmp_txt)
+
     with open(f"{args.out}_summary.txt", "w", encoding="utf-8") as f:
-        f.write(txt)
-    print(f"\n저장: {args.out}_trades.csv / {args.out}_summary.txt")
+        f.write("\n\n".join(parts))
+    print(f"\n저장: {args.out}_*_trades.csv / {args.out}_summary.txt")
 
 
 if __name__ == "__main__":
