@@ -1,0 +1,13 @@
+pandas>=2.0
+numpy>=1.24
+requests>=2.28           # 토스증권 Open API
+setuptools<81            # pykrx 1.0.x가 pkg_resources를 씀 (Python 3.12+ 필요)
+
+# 둘 중 하나를 쓰십시오.
+#
+# [A] KRX 계정 없이 (권장) — 로그인 불필요
+pykrx==1.0.51
+#
+# [B] KRX 계정으로 로그인해서 쓰려면 위 줄을 지우고 아래 줄의 주석을 푸십시오.
+#     .env 에 KRX_ID / KRX_PW 설정 필요
+# pykrx==1.2.8
