@@ -83,17 +83,124 @@ class Config:
     max_tickers: int = 0           # 0=전체
     exclude_pref: bool = True      # 우선주 제외
     exclude_spac: bool = True      # 스팩 제외
+    source: str = "toss"           # 투자자별 순매수 데이터 출처: toss | krx
 
 
 # ----------------------------------------------------------------------------
 # 데이터 수집
 # ----------------------------------------------------------------------------
 def _pykrx():
+    import warnings
+    warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
     try:
         from pykrx import stock
-    except ImportError:
-        sys.exit("pykrx 미설치. `pip install -r requirements.txt` 실행 후 다시 시도하세요.")
+    except ImportError as e:
+        # pykrx 자체가 없는 경우와, pykrx가 의존하는 모듈(pkg_resources 등)이 없는 경우를 구분
+        sys.exit(f"pykrx import 실패: {e}\n`pip install -r requirements.txt` 실행 후 다시 시도하세요.")
     return stock
+
+
+# ----------------------------------------------------------------------------
+# 토스증권 Open API (투자자별 매매동향 · 종목 목록)
+#   .env 에 TOSS_CLIENT_ID / TOSS_CLIENT_SECRET 필요
+#   순매수는 '주식 수'로만 제공 → 금액은 (순매수 주식 수 × 당일 종가)로 추정
+#   외국인은 '등록외국인' 기준 (KRX 합계와 약간 다름)
+# ----------------------------------------------------------------------------
+TOSS_BASE = "https://openapi.tossinvest.com"
+
+
+class TossClient:
+    def __init__(self, client_id: str | None = None, client_secret: str | None = None):
+        self.client_id = client_id or os.environ.get("TOSS_CLIENT_ID")
+        self.client_secret = client_secret or os.environ.get("TOSS_CLIENT_SECRET")
+        if not self.client_id or not self.client_secret:
+            sys.exit("토스 인증정보가 없습니다. backtest/.env 에 TOSS_CLIENT_ID / TOSS_CLIENT_SECRET 을 넣으세요.")
+        import requests
+        self._http = requests.Session()
+        self._token = None
+        self._token_exp = 0.0
+
+    def _auth(self) -> str:
+        if self._token and time.time() < self._token_exp - 60:
+            return self._token
+        r = self._http.post(
+            f"{TOSS_BASE}/oauth2/token",
+            data={"grant_type": "client_credentials",
+                  "client_id": self.client_id, "client_secret": self.client_secret},
+            timeout=20,
+        )
+        if r.status_code != 200:
+            # 응답 본문에 시크릿이 들어가지 않으므로 그대로 보여줘도 안전
+            raise RuntimeError(f"토스 토큰 발급 실패 HTTP {r.status_code}: {r.text[:300]}")
+        j = r.json()
+        self._token = j["access_token"]
+        self._token_exp = time.time() + float(j.get("expires_in", 3600))
+        return self._token
+
+    def get(self, path: str, params: dict | None = None, retries: int = 6):
+        for attempt in range(retries):
+            r = self._http.get(
+                f"{TOSS_BASE}{path}", params=params, timeout=20,
+                headers={"Authorization": f"Bearer {self._auth()}"},
+            )
+            if r.status_code == 200:
+                return r.json()["result"]
+            if r.status_code == 401 and attempt == 0:
+                self._token = None           # 토큰 만료/무효화 → 재발급 후 재시도
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                wait = float(r.headers.get("Retry-After") or r.headers.get("X-RateLimit-Reset") or 1)
+                time.sleep(max(wait, 0.5) * (1 + attempt * 0.5))
+                continue
+            raise RuntimeError(f"토스 API {path} HTTP {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"토스 API {path} 재시도 초과")
+
+    def universe(self, market: str) -> list[dict]:
+        return self.get("/api/v1/stocks/all",
+                        {"market": market, "securityType": "STOCK", "commonShare": "true"})
+
+    def investor_trading(self, symbol: str, start: str) -> list[dict]:
+        """start(YYYYMMDD) 이후 일별 기록 전체 (최신순으로 받아서 페이지 넘김)."""
+        start_d = f"{start[:4]}-{start[4:6]}-{start[6:]}"
+        out, until = [], None
+        while True:
+            params = {"count": 100}
+            if until:
+                params["until"] = until
+            res = self.get(f"/api/v1/stocks/{symbol}/investor-trading", params)
+            recs = res.get("records") or []
+            out.extend(recs)
+            until = res.get("nextUntil")
+            if not recs or not until or recs[-1]["date"] <= start_d:
+                break
+        return [r for r in out if r["date"] >= start_d]
+
+
+def toss_records_to_frame(records: list[dict]) -> pd.DataFrame:
+    """토스 investor-trading 기록 → 날짜 인덱스의 기관/외국인 순매수 주식 수."""
+    rows = []
+    for r in records:
+        inst = (r.get("institution") or {}).get("netBuyVolume")
+        frgn = (r.get("foreigner") or {}).get("netBuyVolume")
+        rows.append({
+            "date": pd.Timestamp(r["date"]),
+            "inst_vol": float(inst) if inst is not None else np.nan,
+            "frgn_vol": float(frgn) if frgn is not None else np.nan,
+        })
+    if not rows:
+        return pd.DataFrame(columns=["inst_vol", "frgn_vol"])
+    df = pd.DataFrame(rows).drop_duplicates("date").set_index("date").sort_index()
+    return df
+
+
+_TOSS: TossClient | None = None
+
+
+def _toss() -> TossClient:
+    global _TOSS
+    if _TOSS is None:
+        _TOSS = TossClient()
+    return _TOSS
 
 
 def check_krx() -> int:
@@ -145,19 +252,28 @@ def _call(stock, names, *args, **kwargs):
 
 def get_universe(cfg: Config, asof: str) -> pd.DataFrame:
     """종목코드 / 종목명 / 시장 목록."""
-    stock = _pykrx()
-    rows = []
-    for mkt in cfg.markets:
-        for t in stock.get_market_ticker_list(asof, market=mkt):
-            rows.append({"ticker": t, "market": mkt})
-    df = pd.DataFrame(rows).drop_duplicates("ticker")
-    names = []
-    for t in df["ticker"]:
-        try:
-            names.append(stock.get_market_ticker_name(t))
-        except Exception:
-            names.append("")
-    df["name"] = names
+    if cfg.source == "toss":
+        rows = []
+        for mkt in cfg.markets:
+            for s in _toss().universe(mkt):
+                rows.append({"ticker": s["symbol"], "market": mkt, "name": s["name"]})
+        df = pd.DataFrame(rows).drop_duplicates("ticker")
+    else:
+        stock = _pykrx()
+        rows = []
+        for mkt in cfg.markets:
+            for t in stock.get_market_ticker_list(asof, market=mkt):
+                rows.append({"ticker": t, "market": mkt})
+        df = pd.DataFrame(rows).drop_duplicates("ticker")
+        names = []
+        for t in df["ticker"]:
+            try:
+                names.append(stock.get_market_ticker_name(t))
+            except Exception:
+                names.append("")
+        df["name"] = names
+    if df.empty:
+        sys.exit("종목 목록이 비어 있습니다. 데이터 소스 접속 상태를 확인하세요.")
 
     if cfg.exclude_pref:
         # 보통주는 종목코드 끝자리가 0
@@ -171,8 +287,11 @@ def get_universe(cfg: Config, asof: str) -> pd.DataFrame:
     return df
 
 
-def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True) -> pd.DataFrame | None:
-    """한 종목의 OHLCV + 투자자별 순매수(기관) 일별 데이터."""
+def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True,
+                 source: str = "toss") -> pd.DataFrame | None:
+    """한 종목의 OHLCV + 투자자별 순매수(기관/외국인) 일별 데이터."""
+    if source == "toss":
+        return fetch_ticker_toss(ticker, start, end, use_cache)
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, f"{ticker}_{start}_{end}_{CACHE_VER}.pkl")
     if use_cache and os.path.exists(path):
@@ -225,6 +344,87 @@ def fetch_ticker(ticker: str, start: str, end: str, use_cache: bool = True) -> p
         except Exception:
             pass
     return df
+
+
+def fetch_ticker_toss(ticker: str, start: str, end: str, use_cache: bool = True) -> pd.DataFrame | None:
+    """
+    OHLCV는 pykrx(네이버 경유, 로그인 불필요), 기관/외국인 순매수는 토스 Open API.
+    inst / foreign 컬럼 = 순매수 주식 수 × 당일 종가 (원, 추정치). 부호는 주식 수와 동일.
+    """
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    path = os.path.join(CACHE_DIR, f"{ticker}_{start}_{end}_toss_{CACHE_VER}.pkl")
+    if use_cache and os.path.exists(path):
+        try:
+            return pd.read_pickle(path)
+        except Exception:
+            pass
+
+    stock = _pykrx()
+    try:
+        ohlcv = _call(stock, ["get_market_ohlcv_by_date", "get_market_ohlcv"], start, end, ticker)
+        inv = toss_records_to_frame(_toss().investor_trading(ticker, start))
+    except Exception as e:
+        print(f"  [skip] {ticker}: {e}", file=sys.stderr)
+        return None
+    if ohlcv is None or ohlcv.empty or inv.empty:
+        return None
+
+    df = pd.DataFrame(
+        {
+            "open": ohlcv["시가"].astype(float),
+            "high": ohlcv["고가"].astype(float),
+            "low": ohlcv["저가"].astype(float),
+            "close": ohlcv["종가"].astype(float),
+            "volume": ohlcv["거래량"].astype(float),
+        }
+    )
+    df.index = pd.to_datetime(df.index)
+    df["turnover"] = (ohlcv["거래대금"].astype(float).values if "거래대금" in ohlcv.columns
+                      else df["close"] * df["volume"])
+    df = df.join(inv, how="inner")
+    df["inst"] = df["inst_vol"] * df["close"]
+    df["foreign"] = df["frgn_vol"] * df["close"]
+    df = df.dropna(subset=["open", "close", "inst", "foreign"])
+    df = df[df["volume"] > 0].sort_index()
+    if df.empty:
+        return None
+
+    if use_cache:
+        try:
+            df.to_pickle(path)
+        except Exception:
+            pass
+    return df
+
+
+def check_toss() -> int:
+    """토스 인증정보와 데이터 수신 여부, 과거 조회 가능 기간을 점검한다."""
+    print(f".env 파일            : {ENV_PATH} {'(있음)' if os.path.exists(ENV_PATH) else '(없음)'}")
+    cid = os.environ.get("TOSS_CLIENT_ID")
+    print(f"TOSS_CLIENT_ID       : {'설정됨' if cid else '없음'}")
+    print(f"TOSS_CLIENT_SECRET   : {'설정됨' if os.environ.get('TOSS_CLIENT_SECRET') else '없음'}")
+    cli = _toss()
+    try:
+        cli._auth()
+        print("토큰 발급            : ✓")
+        uni = cli.universe("KOSPI")
+        print(f"KOSPI 보통주 목록    : {len(uni):,}개")
+        t0 = time.time()
+        start = (datetime.today() - timedelta(days=int(365.25 * 3) + 20)).strftime("%Y%m%d")
+        recs = cli.investor_trading("005930", start)
+        el = time.time() - t0
+    except Exception as e:
+        print(f"  ✗ 실패: {e}")
+        return 1
+    if not recs:
+        print("  ✗ 삼성전자 투자자별 매매동향이 비어 있습니다.")
+        return 1
+    f = toss_records_to_frame(recs)
+    print(f"삼성전자 매매동향    : {len(f)}일치 ({f.index.min():%Y-%m-%d} ~ {f.index.max():%Y-%m-%d}), {el:.1f}초")
+    if f.index.min() > pd.Timestamp(start) + pd.Timedelta(days=30):
+        print(f"  ⚠ 요청 시작일 {start} 보다 짧게만 제공됩니다. --years 를 줄여야 할 수 있습니다.")
+    print(f.tail(3).to_string())
+    return 0
 
 
 # ----------------------------------------------------------------------------
@@ -351,6 +551,8 @@ def report(trades: pd.DataFrame, baseline: np.ndarray, cfg: Config) -> str:
     A(f"대상 시장       : {', '.join(cfg.markets)}")
     A(f"종목 수         : {trades['ticker'].nunique():,}개")
     A(f"거래 비용(왕복) : {cfg.cost_bps:.1f}bp ({cfg.cost_bps/100:.2f}%)")
+    if cfg.source == "toss":
+        A("데이터 출처     : 토스증권 Open API (순매수 금액 = 주식 수 × 종가 추정, 외국인 = 등록외국인)")
     A("")
 
     A("[전체 결과 — 비용 차감 후]")
@@ -615,12 +817,18 @@ def main():
     p.add_argument("--market", default="KOSPI,KOSDAQ")
     p.add_argument("--no-cache", action="store_true")
     p.add_argument("--out", default="result")
+    p.add_argument("--source", default="toss", choices=["toss", "krx"],
+                   help="투자자별 순매수 데이터 출처 (기본 toss)")
     p.add_argument("--check-krx", action="store_true",
                    help="KRX 계정 설정과 데이터 수신만 점검하고 종료")
+    p.add_argument("--check-toss", action="store_true",
+                   help="토스 Open API 인증과 데이터 수신만 점검하고 종료")
     args = p.parse_args()
 
     if args.check_krx:
         sys.exit(check_krx())
+    if args.check_toss:
+        sys.exit(check_toss())
 
     cfg = Config(
         years=args.years,
@@ -632,6 +840,7 @@ def main():
         min_frgn_amount=args.min_frgn_amount,
         min_turnover=args.min_turnover,
         max_tickers=args.max_tickers,
+        source=args.source,
     )
 
     end_dt = datetime.today()
@@ -653,7 +862,7 @@ def main():
     all_base = []
     t0 = time.time()
     for i, row in uni.iterrows():
-        df = fetch_ticker(row["ticker"], start, end, use_cache=not args.no_cache)
+        df = fetch_ticker(row["ticker"], start, end, use_cache=not args.no_cache, source=cfg.source)
         if df is None or df.empty:
             continue
         for label, vcfg, _ in variants:

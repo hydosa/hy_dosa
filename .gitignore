@@ -3,3 +3,8 @@ backtest/__pycache__/
 backtest/result_*
 backtest/.env
 .env
+backtest/.venv/
+backtest/*.log
+backtest/sample200_*
+backtest/full_*
+*.env

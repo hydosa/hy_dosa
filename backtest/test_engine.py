@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 
-from backtest import Config, run_ticker, baseline_ticker, summarize
+from backtest import Config, run_ticker, baseline_ticker, summarize, toss_records_to_frame
 
 
 def make_df(inst, opens, foreign=None):
@@ -123,6 +123,22 @@ def test_frgn_amount_filter():
     print("✓ 외국인 순매수 금액 필터 동작")
 
 
+def test_toss_records_parsing():
+    """토스 investor-trading 응답(최신순, 문자열 수량) → 날짜 오름차순 순매수 주식 수"""
+    recs = [
+        {"date": "2026-07-16", "updatedAt": "", "foreigner": {"netBuyVolume": "-500"},
+         "institution": {"netBuyVolume": "37900"}},
+        {"date": "2026-07-15", "updatedAt": "", "foreigner": {"netBuyVolume": "291850"},
+         "institution": {"netBuyVolume": "-12"}},
+    ]
+    f = toss_records_to_frame(recs)
+    assert list(f.index) == [pd.Timestamp("2026-07-15"), pd.Timestamp("2026-07-16")]
+    assert f.loc["2026-07-16", "inst_vol"] == 37900 and f.loc["2026-07-16", "frgn_vol"] == -500
+    assert f.loc["2026-07-15", "inst_vol"] == -12
+    assert toss_records_to_frame([]).empty
+    print("✓ 토스 매매동향 응답 파싱")
+
+
 def test_summary_stats():
     s = pd.Series([0.10, -0.05, 0.02, -0.01, 0.03])
     out = summarize(s)
@@ -162,7 +178,7 @@ if __name__ == "__main__":
                test_no_lookahead, test_filters,
                test_foreign_condition_filters_out, test_foreign_condition_requires_same_days,
                test_foreign_condition_passes, test_foreign_signals_are_subset,
-               test_frgn_amount_filter,
+               test_frgn_amount_filter, test_toss_records_parsing,
                test_summary_stats, test_baseline,
                test_random_walk_has_no_edge]:
         fn()
